@@ -397,6 +397,18 @@ public interface AccessControlDispatcher {
       throws RoleAlreadyExistsException, NoSuchMetalakeException;
 
   /**
+   * Creates Roles in bulk.
+   *
+   * @param metalake The Metalake of the Roles.
+   * @param roles The Roles to create.
+   * @return The result of the bulk create operation.
+   * @throws NoSuchMetalakeException If the Metalake with the given name does not exist.
+   * @throws RuntimeException If creating the Roles encounters storage issues.
+   */
+  BulkOperationResult bulkCreateRoles(String metalake, RoleCreate[] roles)
+      throws NoSuchMetalakeException;
+
+  /**
    * Gets a Role.
    *
    * @param metalake The Metalake of the Role.
@@ -419,6 +431,18 @@ public interface AccessControlDispatcher {
    * @throws RuntimeException If deleting the Role encounters storage issues.
    */
   boolean deleteRole(String metalake, String role) throws NoSuchMetalakeException;
+
+  /**
+   * Deletes Roles in bulk.
+   *
+   * @param metalake The Metalake of the Roles.
+   * @param roles The names of Roles to delete.
+   * @return The result of the bulk delete operation.
+   * @throws NoSuchMetalakeException If the Metalake with the given name does not exist.
+   * @throws RuntimeException If deleting the Roles encounters storage issues.
+   */
+  BulkOperationResult bulkDeleteRoles(String metalake, String[] roles)
+      throws NoSuchMetalakeException;
 
   Role overridePrivilegesInRole(
       String metalake, String role, List<SecurableObject> securableObjectsToOverride)

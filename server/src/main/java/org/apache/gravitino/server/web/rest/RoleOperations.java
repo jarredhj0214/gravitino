@@ -40,12 +40,18 @@ import org.apache.gravitino.MetadataObject;
 import org.apache.gravitino.MetadataObjects;
 import org.apache.gravitino.authorization.AccessControlDispatcher;
 import org.apache.gravitino.authorization.AuthorizationUtils;
+import org.apache.gravitino.authorization.BulkOperationResult;
 import org.apache.gravitino.authorization.Privilege;
+import org.apache.gravitino.authorization.RoleCreate;
 import org.apache.gravitino.authorization.SecurableObject;
 import org.apache.gravitino.authorization.SecurableObjects;
 import org.apache.gravitino.dto.authorization.PrivilegeDTO;
 import org.apache.gravitino.dto.authorization.SecurableObjectDTO;
+import org.apache.gravitino.dto.requests.BulkRoleCreateRequest;
 import org.apache.gravitino.dto.requests.RoleCreateRequest;
+import org.apache.gravitino.dto.requests.RoleNamesRequest;
+import org.apache.gravitino.dto.responses.BulkOperationFailureDTO;
+import org.apache.gravitino.dto.responses.BulkOperationResponse;
 import org.apache.gravitino.dto.responses.DropResponse;
 import org.apache.gravitino.dto.responses.NameListResponse;
 import org.apache.gravitino.dto.responses.RoleResponse;
@@ -66,7 +72,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @NameBindings.AccessControlInterfaces
-@Path("/metalakes/{metalake}/roles")
+@Path("/")
 public class RoleOperations {
   private static final Logger LOG = LoggerFactory.getLogger(RoleOperations.class);
 
@@ -79,6 +85,7 @@ public class RoleOperations {
   }
 
   @GET
+  @Path("/metalakes/{metalake}/roles")
   @Produces("application/vnd.gravitino.v1+json")
   @Timed(name = "list-role." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
   @ResponseMetered(name = "list-role", absolute = true)
@@ -107,7 +114,7 @@ public class RoleOperations {
   }
 
   @GET
-  @Path("{role}")
+  @Path("/metalakes/{metalake}/roles/{role}")
   @Produces("application/vnd.gravitino.v1+json")
   @Timed(name = "get-role." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
   @ResponseMetered(name = "get-role", absolute = true)
@@ -132,6 +139,7 @@ public class RoleOperations {
   }
 
   @POST
+  @Path("/metalakes/{metalake}/roles")
   @Produces("application/vnd.gravitino.v1+json")
   @Timed(name = "create-role." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
   @ResponseMetered(name = "create-role", absolute = true)
@@ -147,45 +155,6 @@ public class RoleOperations {
           () -> {
             request.validate();
             MetalakeManager.checkMetalakeInUse(metalake);
-            Set<MetadataObject> metadataObjects = Sets.newHashSet();
-            for (SecurableObjectDTO object : request.getSecurableObjects()) {
-              MetadataObject metadataObject =
-                  MetadataObjects.parse(object.getFullName(), object.type());
-              if (metadataObjects.contains(metadataObject)) {
-                throw new IllegalArgumentException(
-                    String.format(
-                        "Doesn't support specifying duplicated securable objects %s type %s",
-                        object.fullName(), object.type()));
-              } else {
-                metadataObjects.add(metadataObject);
-              }
-
-              Set<Privilege> privileges = Sets.newHashSet(object.privileges());
-              AuthorizationUtils.checkDuplicatedNamePrivilege(privileges);
-              try {
-                for (Privilege privilege : object.privileges()) {
-                  AuthorizationUtils.checkPrivilege((PrivilegeDTO) privilege, object, metalake);
-                }
-                MetadataObjectUtil.checkMetadataObject(metalake, object);
-              } catch (NoSuchMetadataObjectException nsm) {
-                throw new IllegalMetadataObjectException(nsm);
-              }
-            }
-
-            List<SecurableObject> securableObjects =
-                Arrays.stream(request.getSecurableObjects())
-                    .map(
-                        securableObjectDTO ->
-                            SecurableObjects.parse(
-                                securableObjectDTO.fullName(),
-                                securableObjectDTO.type(),
-                                securableObjectDTO.privileges().stream()
-                                    .map(
-                                        privilege ->
-                                            DTOConverters.fromPrivilegeDTO(
-                                                (PrivilegeDTO) privilege))
-                                    .collect(Collectors.toList())))
-                    .collect(Collectors.toList());
             return Utils.ok(
                 new RoleResponse(
                     DTOConverters.toDTO(
@@ -193,7 +162,7 @@ public class RoleOperations {
                             metalake,
                             request.getName(),
                             request.getProperties(),
-                            securableObjects))));
+                            toSecurableObjects(metalake, request)))));
           });
 
     } catch (Exception e) {
@@ -203,7 +172,7 @@ public class RoleOperations {
   }
 
   @DELETE
-  @Path("{role}")
+  @Path("/metalakes/{metalake}/roles/{role}")
   @Produces("application/vnd.gravitino.v1+json")
   @Timed(name = "delete-role." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
   @ResponseMetered(name = "delete-role", absolute = true)
@@ -226,5 +195,126 @@ public class RoleOperations {
     } catch (Exception e) {
       return ExceptionHandlers.handleRoleException(OperationType.DELETE, role, metalake, e);
     }
+  }
+
+  /**
+   * Adds roles in bulk.
+   *
+   * @param metalake The metalake name.
+   * @param request The bulk role create request.
+   * @return The bulk operation result.
+   */
+  @POST
+  @Path("/bulk/metalakes/{metalake}/roles/add")
+  @Produces("application/vnd.gravitino.v1+json")
+  @Timed(name = "bulk-add-roles." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
+  @ResponseMetered(name = "bulk-add-roles", absolute = true)
+  @AuthorizationExpression(expression = "METALAKE::OWNER || METALAKE::CREATE_ROLE")
+  public Response addRoles(
+      @PathParam("metalake") @AuthorizationMetadata(type = Entity.EntityType.METALAKE)
+          String metalake,
+      BulkRoleCreateRequest request) {
+    try {
+      return Utils.doAs(
+          httpRequest,
+          () -> {
+            request.validate();
+            MetalakeManager.checkMetalakeInUse(metalake);
+            return Utils.ok(
+                toBulkOperationResponse(
+                    accessControlManager.bulkCreateRoles(
+                        metalake, toRoleCreates(metalake, request.getRoles()))));
+          });
+    } catch (Exception e) {
+      return ExceptionHandlers.handleRoleException(OperationType.CREATE, "", metalake, e);
+    }
+  }
+
+  /**
+   * Removes roles in bulk.
+   *
+   * @param metalake The metalake name.
+   * @param request The bulk role names request.
+   * @return The bulk operation result.
+   */
+  @POST
+  @Path("/bulk/metalakes/{metalake}/roles/remove")
+  @Produces("application/vnd.gravitino.v1+json")
+  @Timed(name = "bulk-remove-roles." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
+  @ResponseMetered(name = "bulk-remove-roles", absolute = true)
+  @AuthorizationExpression(expression = "METALAKE::OWNER")
+  public Response removeRoles(
+      @PathParam("metalake") @AuthorizationMetadata(type = Entity.EntityType.METALAKE)
+          String metalake,
+      RoleNamesRequest request) {
+    try {
+      return Utils.doAs(
+          httpRequest,
+          () -> {
+            request.validate();
+            MetalakeManager.checkMetalakeInUse(metalake);
+            return Utils.ok(
+                toBulkOperationResponse(
+                    accessControlManager.bulkDeleteRoles(metalake, request.getRoleNames())));
+          });
+    } catch (Exception e) {
+      return ExceptionHandlers.handleRoleException(OperationType.DELETE, "", metalake, e);
+    }
+  }
+
+  private static RoleCreate[] toRoleCreates(String metalake, RoleCreateRequest[] requests) {
+    return Arrays.stream(requests)
+        .map(
+            request ->
+                new RoleCreate(
+                    request.getName(),
+                    request.getProperties(),
+                    toSecurableObjects(metalake, request)))
+        .toArray(RoleCreate[]::new);
+  }
+
+  private static List<SecurableObject> toSecurableObjects(
+      String metalake, RoleCreateRequest request) {
+    Set<MetadataObject> metadataObjects = Sets.newHashSet();
+    for (SecurableObjectDTO object : request.getSecurableObjects()) {
+      MetadataObject metadataObject = MetadataObjects.parse(object.getFullName(), object.type());
+      if (metadataObjects.contains(metadataObject)) {
+        throw new IllegalArgumentException(
+            String.format(
+                "Doesn't support specifying duplicated securable objects %s type %s",
+                object.fullName(), object.type()));
+      }
+      metadataObjects.add(metadataObject);
+
+      Set<Privilege> privileges = Sets.newHashSet(object.privileges());
+      AuthorizationUtils.checkDuplicatedNamePrivilege(privileges);
+      try {
+        for (Privilege privilege : object.privileges()) {
+          AuthorizationUtils.checkPrivilege((PrivilegeDTO) privilege, object, metalake);
+        }
+        MetadataObjectUtil.checkMetadataObject(metalake, object);
+      } catch (NoSuchMetadataObjectException nsm) {
+        throw new IllegalMetadataObjectException(nsm);
+      }
+    }
+
+    return Arrays.stream(request.getSecurableObjects())
+        .map(
+            securableObjectDTO ->
+                SecurableObjects.parse(
+                    securableObjectDTO.fullName(),
+                    securableObjectDTO.type(),
+                    securableObjectDTO.privileges().stream()
+                        .map(privilege -> DTOConverters.fromPrivilegeDTO((PrivilegeDTO) privilege))
+                        .collect(Collectors.toList())))
+        .collect(Collectors.toList());
+  }
+
+  private static BulkOperationResponse toBulkOperationResponse(BulkOperationResult result) {
+    return new BulkOperationResponse(
+        result.succeeded(),
+        Arrays.stream(result.failed())
+            .map(failure -> new BulkOperationFailureDTO(failure.name(), failure.reason()))
+            .toArray(BulkOperationFailureDTO[]::new));
   }
 }

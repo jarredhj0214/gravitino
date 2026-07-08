@@ -366,6 +366,28 @@ public class AccessControlManager implements AccessControlDispatcher {
   }
 
   @Override
+  public BulkOperationResult bulkCreateRoles(String metalake, RoleCreate[] roles)
+      throws NoSuchMetalakeException {
+    return TreeLockUtils.doWithTreeLock(
+        NameIdentifier.of(AuthorizationUtils.ofRoleNamespace(metalake).levels()),
+        LockType.WRITE,
+        () -> {
+          BulkResultBuilder resultBuilder = new BulkResultBuilder();
+          for (RoleCreate role : roles) {
+            try {
+              Role createdRole =
+                  roleManager.createRole(
+                      metalake, role.name(), role.properties(), role.securableObjects());
+              resultBuilder.addSucceeded(createdRole.name());
+            } catch (Exception e) {
+              resultBuilder.addFailed(role.name(), failureReason(e));
+            }
+          }
+          return resultBuilder.build();
+        });
+  }
+
+  @Override
   public Role getRole(String metalake, String role)
       throws NoSuchRoleException, NoSuchMetalakeException {
     return TreeLockUtils.doWithTreeLock(
@@ -380,6 +402,28 @@ public class AccessControlManager implements AccessControlDispatcher {
         NameIdentifier.of(AuthorizationUtils.ofRoleNamespace(metalake).levels()),
         LockType.WRITE,
         () -> roleManager.deleteRole(metalake, role));
+  }
+
+  @Override
+  public BulkOperationResult bulkDeleteRoles(String metalake, String[] roles)
+      throws NoSuchMetalakeException {
+    return TreeLockUtils.doWithTreeLock(
+        NameIdentifier.of(AuthorizationUtils.ofRoleNamespace(metalake).levels()),
+        LockType.WRITE,
+        () -> {
+          BulkResultBuilder resultBuilder = new BulkResultBuilder();
+          for (String role : roles) {
+            try {
+              if (!roleManager.deleteRole(metalake, role)) {
+                throw new IllegalArgumentException("Role does not exist");
+              }
+              resultBuilder.addSucceeded(role);
+            } catch (Exception e) {
+              resultBuilder.addFailed(role, failureReason(e));
+            }
+          }
+          return resultBuilder.build();
+        });
   }
 
   @Override

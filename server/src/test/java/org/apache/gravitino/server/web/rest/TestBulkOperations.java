@@ -27,7 +27,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
+import com.google.common.collect.Lists;
 import java.io.IOException;
+import java.util.Collections;
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.client.Entity;
 import javax.ws.rs.core.Application;
@@ -40,15 +42,23 @@ import org.apache.gravitino.GravitinoEnv;
 import org.apache.gravitino.authorization.AccessControlManager;
 import org.apache.gravitino.authorization.BulkOperationResult;
 import org.apache.gravitino.authorization.OwnerDispatcher;
+import org.apache.gravitino.authorization.Privileges;
+import org.apache.gravitino.authorization.SecurableObject;
+import org.apache.gravitino.authorization.SecurableObjects;
 import org.apache.gravitino.catalog.CatalogDispatcher;
 import org.apache.gravitino.connector.PropertiesMetadata;
+import org.apache.gravitino.dto.authorization.SecurableObjectDTO;
 import org.apache.gravitino.dto.requests.BulkGroupAddRequest;
+import org.apache.gravitino.dto.requests.BulkRoleCreateRequest;
 import org.apache.gravitino.dto.requests.BulkUserAddRequest;
 import org.apache.gravitino.dto.requests.GroupAddRequest;
 import org.apache.gravitino.dto.requests.GroupNamesRequest;
+import org.apache.gravitino.dto.requests.RoleCreateRequest;
+import org.apache.gravitino.dto.requests.RoleNamesRequest;
 import org.apache.gravitino.dto.requests.UserAddRequest;
 import org.apache.gravitino.dto.requests.UsernamesRequest;
 import org.apache.gravitino.dto.responses.BulkOperationResponse;
+import org.apache.gravitino.dto.util.DTOConverters;
 import org.apache.gravitino.lock.LockManager;
 import org.apache.gravitino.meta.BaseMetalake;
 import org.apache.gravitino.rest.RESTUtils;
@@ -110,6 +120,7 @@ class TestBulkOperations extends BaseOperationsTest {
     ResourceConfig resourceConfig = new ResourceConfig();
     resourceConfig.register(UserOperations.class);
     resourceConfig.register(GroupOperations.class);
+    resourceConfig.register(RoleOperations.class);
     resourceConfig.register(
         new AbstractBinder() {
           @Override
@@ -277,6 +288,60 @@ class TestBulkOperations extends BaseOperationsTest {
     BulkOperationResponse response = resp.readEntity(BulkOperationResponse.class);
     Assertions.assertArrayEquals(new String[] {"group1"}, response.getSucceeded());
     Assertions.assertEquals("group2", response.getFailed()[0].getName());
+  }
+
+  @Test
+  void testBulkAddRoles() {
+    SecurableObject securableObject =
+        SecurableObjects.ofCatalog("catalog", Lists.newArrayList(Privileges.UseCatalog.allow()));
+    RoleCreateRequest roleRequest =
+        new RoleCreateRequest(
+            "role1",
+            Collections.emptyMap(),
+            new SecurableObjectDTO[] {DTOConverters.toDTO(securableObject)});
+    when(manager.bulkCreateRoles(eq("metalake1"), any()))
+        .thenReturn(
+            new BulkOperationResult(new String[] {"role1"}, new BulkOperationResult.Failure[0]));
+
+    Response resp =
+        target("/bulk/metalakes/metalake1/roles/add")
+            .request(MediaType.APPLICATION_JSON_TYPE)
+            .accept("application/vnd.gravitino.v1+json")
+            .post(
+                Entity.entity(
+                    new BulkRoleCreateRequest(new RoleCreateRequest[] {roleRequest}),
+                    MediaType.APPLICATION_JSON_TYPE));
+
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), resp.getStatus());
+    BulkOperationResponse response = resp.readEntity(BulkOperationResponse.class);
+    Assertions.assertArrayEquals(new String[] {"role1"}, response.getSucceeded());
+    Assertions.assertEquals(0, response.getFailed().length);
+  }
+
+  @Test
+  void testBulkRemoveRoles() {
+    when(manager.bulkDeleteRoles(eq("metalake1"), any()))
+        .thenReturn(
+            new BulkOperationResult(
+                new String[] {"role1"},
+                new BulkOperationResult.Failure[] {
+                  new BulkOperationResult.Failure(
+                      "role2", "IllegalArgumentException: Role does not exist")
+                }));
+
+    Response resp =
+        target("/bulk/metalakes/metalake1/roles/remove")
+            .request(MediaType.APPLICATION_JSON_TYPE)
+            .accept("application/vnd.gravitino.v1+json")
+            .post(
+                Entity.entity(
+                    new RoleNamesRequest(new String[] {"role1", "role2"}),
+                    MediaType.APPLICATION_JSON_TYPE));
+
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), resp.getStatus());
+    BulkOperationResponse response = resp.readEntity(BulkOperationResponse.class);
+    Assertions.assertArrayEquals(new String[] {"role1"}, response.getSucceeded());
+    Assertions.assertEquals("role2", response.getFailed()[0].getName());
   }
 
   private BaseMetalake inUseMetalake() {

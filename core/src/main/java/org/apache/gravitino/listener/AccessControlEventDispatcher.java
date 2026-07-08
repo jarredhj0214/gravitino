@@ -29,6 +29,7 @@ import org.apache.gravitino.authorization.Group;
 import org.apache.gravitino.authorization.GroupAdd;
 import org.apache.gravitino.authorization.Privilege;
 import org.apache.gravitino.authorization.Role;
+import org.apache.gravitino.authorization.RoleCreate;
 import org.apache.gravitino.authorization.SecurableObject;
 import org.apache.gravitino.authorization.User;
 import org.apache.gravitino.authorization.UserAdd;
@@ -617,6 +618,13 @@ public class AccessControlEventDispatcher implements AccessControlDispatcher {
 
   /** {@inheritDoc} */
   @Override
+  public BulkOperationResult bulkCreateRoles(String metalake, RoleCreate[] roles)
+      throws NoSuchMetalakeException {
+    return dispatcher.bulkCreateRoles(metalake, roles);
+  }
+
+  /** {@inheritDoc} */
+  @Override
   public Role getRole(String metalake, String role)
       throws NoSuchRoleException, NoSuchMetalakeException {
     String initiator = PrincipalUtils.getCurrentUserName();
@@ -648,6 +656,13 @@ public class AccessControlEventDispatcher implements AccessControlDispatcher {
       eventBus.dispatchEvent(new DeleteRoleFailureEvent(initiator, metalake, e, role));
       throw e;
     }
+  }
+
+  /** {@inheritDoc} */
+  @Override
+  public BulkOperationResult bulkDeleteRoles(String metalake, String[] roles)
+      throws NoSuchMetalakeException {
+    return dispatcher.bulkDeleteRoles(metalake, roles);
   }
 
   /** {@inheritDoc} */

@@ -22,6 +22,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -29,10 +30,13 @@ import java.util.Collections;
 import org.apache.commons.lang3.reflect.FieldUtils;
 import org.apache.gravitino.GravitinoEnv;
 import org.apache.gravitino.authorization.AccessControlDispatcher;
+import org.apache.gravitino.authorization.BulkOperationResult;
 import org.apache.gravitino.authorization.GravitinoAuthorizer;
 import org.apache.gravitino.authorization.Group;
+import org.apache.gravitino.authorization.Owner;
 import org.apache.gravitino.authorization.OwnerDispatcher;
 import org.apache.gravitino.authorization.Role;
+import org.apache.gravitino.authorization.RoleCreate;
 import org.apache.gravitino.authorization.User;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -86,6 +90,29 @@ public class TestAccessControlHookDispatcher {
                     "test_metalake", "test_role", Collections.emptyMap(), Collections.emptyList()));
     Assertions.assertEquals("Set owner failed", thrown.getMessage());
     verify(mockDispatcher).createRole(any(), any(), any(), any());
+  }
+
+  @Test
+  public void testBulkCreateRolesSetsOwnerForSucceededRoles() {
+    when(mockDispatcher.bulkCreateRoles(eq("test_metalake"), any()))
+        .thenReturn(
+            new BulkOperationResult(
+                new String[] {"test_role"},
+                new BulkOperationResult.Failure[] {
+                  new BulkOperationResult.Failure("failed_role", "mock failure")
+                }));
+
+    BulkOperationResult result =
+        hookDispatcher.bulkCreateRoles(
+            "test_metalake",
+            new RoleCreate[] {
+              new RoleCreate("test_role", Collections.emptyMap(), Collections.emptyList()),
+              new RoleCreate("failed_role", Collections.emptyMap(), Collections.emptyList())
+            });
+
+    Assertions.assertArrayEquals(new String[] {"test_role"}, result.succeeded());
+    verify(mockOwnerDispatcher, times(1))
+        .setOwner(eq("test_metalake"), any(), any(), eq(Owner.Type.USER));
   }
 
   @Test

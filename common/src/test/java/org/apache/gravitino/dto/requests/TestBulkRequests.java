@@ -18,6 +18,11 @@
  */
 package org.apache.gravitino.dto.requests;
 
+import java.util.Collections;
+import org.apache.gravitino.authorization.Privilege;
+import org.apache.gravitino.authorization.SecurableObject;
+import org.apache.gravitino.dto.authorization.PrivilegeDTO;
+import org.apache.gravitino.dto.authorization.SecurableObjectDTO;
 import org.apache.gravitino.json.JsonUtils;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -92,5 +97,38 @@ public class TestBulkRequests {
             });
 
     Assertions.assertThrows(IllegalArgumentException.class, request::validate);
+  }
+
+  @Test
+  public void testDuplicateRoleNames() {
+    RoleNamesRequest request = new RoleNamesRequest(new String[] {"role1", "role1"});
+
+    Assertions.assertThrows(IllegalArgumentException.class, request::validate);
+  }
+
+  @Test
+  public void testDuplicateRoleCreateNames() {
+    RoleCreateRequest role1 =
+        new RoleCreateRequest("role1", Collections.emptyMap(), new SecurableObjectDTO[] {table()});
+    RoleCreateRequest role2 =
+        new RoleCreateRequest("role1", Collections.emptyMap(), new SecurableObjectDTO[] {table()});
+    BulkRoleCreateRequest request =
+        new BulkRoleCreateRequest(new RoleCreateRequest[] {role1, role2});
+
+    Assertions.assertThrows(IllegalArgumentException.class, request::validate);
+  }
+
+  private SecurableObjectDTO table() {
+    return SecurableObjectDTO.builder()
+        .withFullName("catalog1.schema1.table1")
+        .withType(SecurableObject.Type.TABLE)
+        .withPrivileges(
+            new PrivilegeDTO[] {
+              PrivilegeDTO.builder()
+                  .withName(Privilege.Name.SELECT_TABLE)
+                  .withCondition(Privilege.Condition.ALLOW)
+                  .build()
+            })
+        .build();
   }
 }

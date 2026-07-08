@@ -483,6 +483,67 @@ public class TestAccessControlManager {
   }
 
   @Test
+  public void testBulkCreateRoles() {
+    accessControlManager.createRole(
+        METALAKE,
+        "bulkCreateRole2",
+        Collections.emptyMap(),
+        Lists.newArrayList(
+            SecurableObjects.ofCatalog(
+                "catalog", Lists.newArrayList(Privileges.UseCatalog.allow()))));
+
+    BulkOperationResult result =
+        accessControlManager.bulkCreateRoles(
+            METALAKE,
+            new RoleCreate[] {
+              new RoleCreate(
+                  "bulkCreateRole1",
+                  ImmutableMap.of("k1", "v1"),
+                  Lists.newArrayList(
+                      SecurableObjects.ofCatalog(
+                          "catalog", Lists.newArrayList(Privileges.UseCatalog.allow())))),
+              new RoleCreate(
+                  "bulkCreateRole2",
+                  Collections.emptyMap(),
+                  Lists.newArrayList(
+                      SecurableObjects.ofCatalog(
+                          "catalog", Lists.newArrayList(Privileges.UseCatalog.allow()))))
+            });
+
+    Assertions.assertArrayEquals(new String[] {"bulkCreateRole1"}, result.succeeded());
+    Assertions.assertEquals(1, result.failed().length);
+    Assertions.assertEquals("bulkCreateRole2", result.failed()[0].name());
+    Assertions.assertTrue(result.failed()[0].reason().contains("RoleAlreadyExistsException"));
+
+    Role role = accessControlManager.getRole(METALAKE, "bulkCreateRole1");
+    Assertions.assertEquals("bulkCreateRole1", role.name());
+    testProperties(ImmutableMap.of("k1", "v1"), role.properties());
+
+    accessControlManager.deleteRole(METALAKE, "bulkCreateRole1");
+    accessControlManager.deleteRole(METALAKE, "bulkCreateRole2");
+  }
+
+  @Test
+  public void testBulkDeleteRoles() {
+    accessControlManager.createRole(
+        METALAKE,
+        "bulkDeleteRole1",
+        Collections.emptyMap(),
+        Lists.newArrayList(
+            SecurableObjects.ofCatalog(
+                "catalog", Lists.newArrayList(Privileges.UseCatalog.allow()))));
+
+    BulkOperationResult result =
+        accessControlManager.bulkDeleteRoles(
+            METALAKE, new String[] {"bulkDeleteRole1", "bulkDeleteRole2"});
+
+    Assertions.assertArrayEquals(new String[] {"bulkDeleteRole1"}, result.succeeded());
+    Assertions.assertEquals(1, result.failed().length);
+    Assertions.assertEquals("bulkDeleteRole2", result.failed()[0].name());
+    Assertions.assertTrue(result.failed()[0].reason().contains("IllegalArgumentException"));
+  }
+
+  @Test
   public void testListRoles() {
     Map<String, String> props = ImmutableMap.of("k1", "v1");
 

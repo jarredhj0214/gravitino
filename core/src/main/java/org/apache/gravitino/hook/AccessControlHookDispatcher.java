@@ -18,6 +18,7 @@
  */
 package org.apache.gravitino.hook;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -34,6 +35,7 @@ import org.apache.gravitino.authorization.Owner;
 import org.apache.gravitino.authorization.OwnerDispatcher;
 import org.apache.gravitino.authorization.Privilege;
 import org.apache.gravitino.authorization.Role;
+import org.apache.gravitino.authorization.RoleCreate;
 import org.apache.gravitino.authorization.SecurableObject;
 import org.apache.gravitino.authorization.User;
 import org.apache.gravitino.authorization.UserAdd;
@@ -252,6 +254,26 @@ public class AccessControlHookDispatcher implements AccessControlDispatcher {
   }
 
   @Override
+  public BulkOperationResult bulkCreateRoles(String metalake, RoleCreate[] roles)
+      throws NoSuchMetalakeException {
+    BulkOperationResult result = dispatcher.bulkCreateRoles(metalake, roles);
+
+    OwnerDispatcher ownerDispatcher = GravitinoEnv.getInstance().ownerDispatcher();
+    if (ownerDispatcher != null) {
+      for (String role : result.succeeded()) {
+        ownerDispatcher.setOwner(
+            metalake,
+            NameIdentifierUtil.toMetadataObject(
+                AuthorizationUtils.ofRole(metalake, role), Entity.EntityType.ROLE),
+            PrincipalUtils.getCurrentUserName(),
+            Owner.Type.USER);
+      }
+    }
+
+    return result;
+  }
+
+  @Override
   public Role getRole(String metalake, String role)
       throws NoSuchRoleException, NoSuchMetalakeException {
     return dispatcher.getRole(metalake, role);
@@ -270,6 +292,29 @@ public class AccessControlHookDispatcher implements AccessControlDispatcher {
       notifyRoleUserRelChange(((RoleEntity) oldRole).id());
     }
     return resultOfDeleteRole;
+  }
+
+  @Override
+  public BulkOperationResult bulkDeleteRoles(String metalake, String[] roles)
+      throws NoSuchMetalakeException {
+    Map<String, Long> roleIds = new HashMap<>();
+    for (String role : roles) {
+      try {
+        roleIds.put(role, ((RoleEntity) getRole(metalake, role)).id());
+      } catch (NoSuchRoleException e) {
+        LOG.debug(e.getMessage());
+      }
+    }
+
+    BulkOperationResult result = dispatcher.bulkDeleteRoles(metalake, roles);
+    for (String role : result.succeeded()) {
+      Long roleId = roleIds.get(role);
+      if (roleId != null) {
+        notifyRoleUserRelChange(roleId);
+      }
+    }
+
+    return result;
   }
 
   @Override
