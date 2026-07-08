@@ -215,11 +215,57 @@ public class AccessControlManager implements AccessControlDispatcher {
   }
 
   @Override
+  public BulkOperationResult bulkAddGroups(String metalake, GroupAdd[] groups)
+      throws NoSuchMetalakeException {
+    return TreeLockUtils.doWithTreeLock(
+        NameIdentifier.of(AuthorizationUtils.ofGroupNamespace(metalake).levels()),
+        LockType.WRITE,
+        () -> {
+          BulkResultBuilder resultBuilder = new BulkResultBuilder();
+          for (GroupAdd group : groups) {
+            try {
+              Group addedGroup =
+                  group.externalId() != null
+                      ? userGroupExternalManager.addGroup(
+                          metalake, group.name(), group.externalId())
+                      : userGroupManager.addGroup(metalake, group.name());
+              resultBuilder.addSucceeded(addedGroup.name());
+            } catch (Exception e) {
+              resultBuilder.addFailed(group.name(), failureReason(e));
+            }
+          }
+          return resultBuilder.build();
+        });
+  }
+
+  @Override
   public boolean removeGroup(String metalake, String group) throws NoSuchMetalakeException {
     return TreeLockUtils.doWithTreeLock(
         NameIdentifier.of(AuthorizationUtils.ofGroupNamespace(metalake).levels()),
         LockType.WRITE,
         () -> userGroupManager.removeGroup(metalake, group));
+  }
+
+  @Override
+  public BulkOperationResult bulkRemoveGroups(String metalake, String[] groups)
+      throws NoSuchMetalakeException {
+    return TreeLockUtils.doWithTreeLock(
+        NameIdentifier.of(AuthorizationUtils.ofGroupNamespace(metalake).levels()),
+        LockType.WRITE,
+        () -> {
+          BulkResultBuilder resultBuilder = new BulkResultBuilder();
+          for (String group : groups) {
+            try {
+              if (!userGroupManager.removeGroup(metalake, group)) {
+                throw new IllegalArgumentException("Group does not exist");
+              }
+              resultBuilder.addSucceeded(group);
+            } catch (Exception e) {
+              resultBuilder.addFailed(group, failureReason(e));
+            }
+          }
+          return resultBuilder.build();
+        });
   }
 
   @Override

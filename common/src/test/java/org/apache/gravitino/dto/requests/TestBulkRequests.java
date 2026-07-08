@@ -64,4 +64,33 @@ public class TestBulkRequests {
 
     Assertions.assertThrows(IllegalArgumentException.class, request::validate);
   }
+
+  @Test
+  public void testDuplicateGroupNames() {
+    GroupNamesRequest request = new GroupNamesRequest(new String[] {"group1", "group1"});
+
+    Assertions.assertThrows(IllegalArgumentException.class, request::validate);
+  }
+
+  @Test
+  public void testDuplicateGroupsForBulkAdd() {
+    BulkGroupAddRequest request =
+        new BulkGroupAddRequest(
+            new GroupAddRequest[] {
+              new GroupAddRequest("group1", "external1"), new GroupAddRequest("group1", "external2")
+            });
+
+    Assertions.assertThrows(IllegalArgumentException.class, request::validate);
+  }
+
+  @Test
+  public void testDuplicateGroupExternalIdsForBulkAdd() {
+    BulkGroupAddRequest request =
+        new BulkGroupAddRequest(
+            new GroupAddRequest[] {
+              new GroupAddRequest("group1", "external1"), new GroupAddRequest("group2", "external1")
+            });
+
+    Assertions.assertThrows(IllegalArgumentException.class, request::validate);
+  }
 }

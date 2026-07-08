@@ -29,6 +29,7 @@ import org.apache.gravitino.authorization.AuthorizationUtils;
 import org.apache.gravitino.authorization.BulkOperationResult;
 import org.apache.gravitino.authorization.GravitinoAuthorizer;
 import org.apache.gravitino.authorization.Group;
+import org.apache.gravitino.authorization.GroupAdd;
 import org.apache.gravitino.authorization.Owner;
 import org.apache.gravitino.authorization.OwnerDispatcher;
 import org.apache.gravitino.authorization.Privilege;
@@ -147,8 +148,20 @@ public class AccessControlHookDispatcher implements AccessControlDispatcher {
   }
 
   @Override
+  public BulkOperationResult bulkAddGroups(String metalake, GroupAdd[] groups)
+      throws NoSuchMetalakeException {
+    return dispatcher.bulkAddGroups(metalake, groups);
+  }
+
+  @Override
   public boolean removeGroup(String metalake, String group) throws NoSuchMetalakeException {
     return dispatcher.removeGroup(metalake, group);
+  }
+
+  @Override
+  public BulkOperationResult bulkRemoveGroups(String metalake, String[] groups)
+      throws NoSuchMetalakeException {
+    return dispatcher.bulkRemoveGroups(metalake, groups);
   }
 
   @Override

@@ -42,7 +42,10 @@ import org.apache.gravitino.authorization.BulkOperationResult;
 import org.apache.gravitino.authorization.OwnerDispatcher;
 import org.apache.gravitino.catalog.CatalogDispatcher;
 import org.apache.gravitino.connector.PropertiesMetadata;
+import org.apache.gravitino.dto.requests.BulkGroupAddRequest;
 import org.apache.gravitino.dto.requests.BulkUserAddRequest;
+import org.apache.gravitino.dto.requests.GroupAddRequest;
+import org.apache.gravitino.dto.requests.GroupNamesRequest;
 import org.apache.gravitino.dto.requests.UserAddRequest;
 import org.apache.gravitino.dto.requests.UsernamesRequest;
 import org.apache.gravitino.dto.responses.BulkOperationResponse;
@@ -106,6 +109,7 @@ class TestBulkOperations extends BaseOperationsTest {
 
     ResourceConfig resourceConfig = new ResourceConfig();
     resourceConfig.register(UserOperations.class);
+    resourceConfig.register(GroupOperations.class);
     resourceConfig.register(
         new AbstractBinder() {
           @Override
@@ -196,6 +200,83 @@ class TestBulkOperations extends BaseOperationsTest {
     BulkOperationResponse response = resp.readEntity(BulkOperationResponse.class);
     Assertions.assertArrayEquals(new String[] {"user1"}, response.getSucceeded());
     Assertions.assertEquals("user2", response.getFailed()[0].getName());
+  }
+
+  @Test
+  void testBulkAddGroups() {
+    when(manager.bulkAddGroups(eq("metalake1"), any()))
+        .thenReturn(
+            new BulkOperationResult(
+                new String[] {"group1", "group2"}, new BulkOperationResult.Failure[0]));
+
+    Response resp =
+        target("/bulk/metalakes/metalake1/groups/add")
+            .request(MediaType.APPLICATION_JSON_TYPE)
+            .accept("application/vnd.gravitino.v1+json")
+            .post(
+                Entity.entity(
+                    new BulkGroupAddRequest(
+                        new GroupAddRequest[] {
+                          new GroupAddRequest("group1"), new GroupAddRequest("group2")
+                        }),
+                    MediaType.APPLICATION_JSON_TYPE));
+
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), resp.getStatus());
+    BulkOperationResponse response = resp.readEntity(BulkOperationResponse.class);
+    Assertions.assertArrayEquals(new String[] {"group1", "group2"}, response.getSucceeded());
+    Assertions.assertEquals(0, response.getFailed().length);
+  }
+
+  @Test
+  void testBulkAddGroupsWithExternalId() {
+    when(manager.bulkAddGroups(eq("metalake1"), any()))
+        .thenReturn(
+            new BulkOperationResult(
+                new String[] {"group1", "group2"}, new BulkOperationResult.Failure[0]));
+
+    Response resp =
+        target("/bulk/metalakes/metalake1/groups/add")
+            .request(MediaType.APPLICATION_JSON_TYPE)
+            .accept("application/vnd.gravitino.v1+json")
+            .post(
+                Entity.entity(
+                    new BulkGroupAddRequest(
+                        new GroupAddRequest[] {
+                          new GroupAddRequest("group1", "external1"),
+                          new GroupAddRequest("group2", "external2")
+                        }),
+                    MediaType.APPLICATION_JSON_TYPE));
+
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), resp.getStatus());
+    BulkOperationResponse response = resp.readEntity(BulkOperationResponse.class);
+    Assertions.assertArrayEquals(new String[] {"group1", "group2"}, response.getSucceeded());
+    Assertions.assertEquals(0, response.getFailed().length);
+  }
+
+  @Test
+  void testBulkRemoveGroupsWithPartialFailure() {
+    when(manager.bulkRemoveGroups(eq("metalake1"), any()))
+        .thenReturn(
+            new BulkOperationResult(
+                new String[] {"group1"},
+                new BulkOperationResult.Failure[] {
+                  new BulkOperationResult.Failure(
+                      "group2", "IllegalArgumentException: Group does not exist")
+                }));
+
+    Response resp =
+        target("/bulk/metalakes/metalake1/groups/remove")
+            .request(MediaType.APPLICATION_JSON_TYPE)
+            .accept("application/vnd.gravitino.v1+json")
+            .post(
+                Entity.entity(
+                    new GroupNamesRequest(new String[] {"group1", "group2"}),
+                    MediaType.APPLICATION_JSON_TYPE));
+
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), resp.getStatus());
+    BulkOperationResponse response = resp.readEntity(BulkOperationResponse.class);
+    Assertions.assertArrayEquals(new String[] {"group1"}, response.getSucceeded());
+    Assertions.assertEquals("group2", response.getFailed()[0].getName());
   }
 
   private BaseMetalake inUseMetalake() {

@@ -41,10 +41,29 @@ class BulkRequestValidator {
         fieldName, Arrays.stream(requests).map(UserAddRequest::getName).toArray(String[]::new));
   }
 
+  static void checkNoDuplicateNames(String fieldName, GroupAddRequest[] requests) {
+    checkNoDuplicateNames(
+        fieldName, Arrays.stream(requests).map(GroupAddRequest::getName).toArray(String[]::new));
+  }
+
   static void checkNoDuplicateExternalIds(String fieldName, UserAddRequest[] requests) {
     Set<String> externalIdSet = new HashSet<>();
     Arrays.stream(requests)
         .map(UserAddRequest::getExternalId)
+        .filter(Objects::nonNull)
+        .forEach(
+            externalId ->
+                Preconditions.checkArgument(
+                    externalIdSet.add(externalId),
+                    "\"%s\" cannot contain duplicated external id: %s",
+                    fieldName,
+                    externalId));
+  }
+
+  static void checkNoDuplicateExternalIds(String fieldName, GroupAddRequest[] requests) {
+    Set<String> externalIdSet = new HashSet<>();
+    Arrays.stream(requests)
+        .map(GroupAddRequest::getExternalId)
         .filter(Objects::nonNull)
         .forEach(
             externalId ->

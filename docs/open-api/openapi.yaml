@@ -200,6 +200,12 @@ paths:
   /metalakes/{metalake}/groups/{group}:
     $ref: "./groups.yaml#/paths/~1metalakes~1%7Bmetalake%7D~1groups~1%7Bgroup%7D"
 
+  /bulk/metalakes/{metalake}/groups/add:
+    $ref: "./groups.yaml#/paths/~1bulk~1metalakes~1%7Bmetalake%7D~1groups~1add"
+
+  /bulk/metalakes/{metalake}/groups/remove:
+    $ref: "./groups.yaml#/paths/~1bulk~1metalakes~1%7Bmetalake%7D~1groups~1remove"
+
   /metalakes/{metalake}/roles:
     $ref: "./roles.yaml#/paths/~1metalakes~1%7Bmetalake%7D~1roles"
 

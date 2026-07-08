@@ -26,6 +26,7 @@ import org.apache.gravitino.MetadataObject;
 import org.apache.gravitino.authorization.AccessControlDispatcher;
 import org.apache.gravitino.authorization.BulkOperationResult;
 import org.apache.gravitino.authorization.Group;
+import org.apache.gravitino.authorization.GroupAdd;
 import org.apache.gravitino.authorization.Privilege;
 import org.apache.gravitino.authorization.Role;
 import org.apache.gravitino.authorization.SecurableObject;
@@ -382,6 +383,13 @@ public class AccessControlEventDispatcher implements AccessControlDispatcher {
 
   /** {@inheritDoc} */
   @Override
+  public BulkOperationResult bulkAddGroups(String metalake, GroupAdd[] groups)
+      throws NoSuchMetalakeException {
+    return dispatcher.bulkAddGroups(metalake, groups);
+  }
+
+  /** {@inheritDoc} */
+  @Override
   public boolean removeGroup(String metalake, String group) throws NoSuchMetalakeException {
     String initiator = PrincipalUtils.getCurrentUserName();
 
@@ -395,6 +403,13 @@ public class AccessControlEventDispatcher implements AccessControlDispatcher {
       eventBus.dispatchEvent(new RemoveGroupFailureEvent(initiator, metalake, e, group));
       throw e;
     }
+  }
+
+  /** {@inheritDoc} */
+  @Override
+  public BulkOperationResult bulkRemoveGroups(String metalake, String[] groups)
+      throws NoSuchMetalakeException {
+    return dispatcher.bulkRemoveGroups(metalake, groups);
   }
 
   /** {@inheritDoc} */

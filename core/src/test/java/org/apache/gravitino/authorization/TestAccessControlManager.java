@@ -361,6 +361,43 @@ public class TestAccessControlManager {
   }
 
   @Test
+  public void testBulkAddGroups() {
+    accessControlManager.addGroup(METALAKE, "bulkAddGroup2");
+
+    BulkOperationResult result =
+        accessControlManager.bulkAddGroups(
+            METALAKE,
+            new GroupAdd[] {
+              new GroupAdd("bulkAddGroup1", "bulk-add-group-1"), new GroupAdd("bulkAddGroup2", null)
+            });
+
+    Assertions.assertArrayEquals(new String[] {"bulkAddGroup1"}, result.succeeded());
+    Assertions.assertEquals(1, result.failed().length);
+    Assertions.assertEquals("bulkAddGroup2", result.failed()[0].name());
+    Assertions.assertTrue(result.failed()[0].reason().contains("GroupAlreadyExistsException"));
+
+    Group group = accessControlManager.getGroup(METALAKE, "bulkAddGroup1");
+    Assertions.assertEquals("bulk-add-group-1", group.externalId());
+
+    accessControlManager.removeGroup(METALAKE, "bulkAddGroup1");
+    accessControlManager.removeGroup(METALAKE, "bulkAddGroup2");
+  }
+
+  @Test
+  public void testBulkRemoveGroups() {
+    accessControlManager.addGroup(METALAKE, "bulkRemoveGroup1");
+
+    BulkOperationResult result =
+        accessControlManager.bulkRemoveGroups(
+            METALAKE, new String[] {"bulkRemoveGroup1", "bulkRemoveGroup2"});
+
+    Assertions.assertArrayEquals(new String[] {"bulkRemoveGroup1"}, result.succeeded());
+    Assertions.assertEquals(1, result.failed().length);
+    Assertions.assertEquals("bulkRemoveGroup2", result.failed()[0].name());
+    Assertions.assertTrue(result.failed()[0].reason().contains("IllegalArgumentException"));
+  }
+
+  @Test
   public void testServiceAdmin() {
     Assertions.assertTrue(accessControlManager.isServiceAdmin("admin1"));
     Assertions.assertTrue(accessControlManager.isServiceAdmin("admin2"));

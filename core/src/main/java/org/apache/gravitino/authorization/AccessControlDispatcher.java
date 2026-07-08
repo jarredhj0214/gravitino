@@ -215,6 +215,18 @@ public interface AccessControlDispatcher {
       throws GroupAlreadyExistsException, NoSuchMetalakeException;
 
   /**
+   * Adds Groups in bulk.
+   *
+   * @param metalake The Metalake of the Groups.
+   * @param groups The Groups to add.
+   * @return The result of the bulk add operation.
+   * @throws NoSuchMetalakeException If the Metalake with the given name does not exist.
+   * @throws RuntimeException If adding the Groups encounters storage issues.
+   */
+  BulkOperationResult bulkAddGroups(String metalake, GroupAdd[] groups)
+      throws NoSuchMetalakeException;
+
+  /**
    * Removes a Group.
    *
    * @param metalake The Metalake of the Group.
@@ -225,6 +237,18 @@ public interface AccessControlDispatcher {
    * @throws RuntimeException If removing the Group encounters storage issues.
    */
   boolean removeGroup(String metalake, String group) throws NoSuchMetalakeException;
+
+  /**
+   * Removes Groups in bulk.
+   *
+   * @param metalake The Metalake of the Groups.
+   * @param groups The names of Groups to remove.
+   * @return The result of the bulk remove operation.
+   * @throws NoSuchMetalakeException If the Metalake with the given name does not exist.
+   * @throws RuntimeException If removing the Groups encounters storage issues.
+   */
+  BulkOperationResult bulkRemoveGroups(String metalake, String[] groups)
+      throws NoSuchMetalakeException;
 
   /**
    * Removes a Group by external identifier.

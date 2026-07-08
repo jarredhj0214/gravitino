@@ -38,10 +38,16 @@ import org.apache.gravitino.MetadataObject;
 import org.apache.gravitino.MetadataObjects;
 import org.apache.gravitino.Namespace;
 import org.apache.gravitino.authorization.AccessControlDispatcher;
+import org.apache.gravitino.authorization.BulkOperationResult;
 import org.apache.gravitino.authorization.Group;
+import org.apache.gravitino.authorization.GroupAdd;
 import org.apache.gravitino.authorization.Owner;
 import org.apache.gravitino.authorization.OwnerDispatcher;
+import org.apache.gravitino.dto.requests.BulkGroupAddRequest;
 import org.apache.gravitino.dto.requests.GroupAddRequest;
+import org.apache.gravitino.dto.requests.GroupNamesRequest;
+import org.apache.gravitino.dto.responses.BulkOperationFailureDTO;
+import org.apache.gravitino.dto.responses.BulkOperationResponse;
 import org.apache.gravitino.dto.responses.GroupListResponse;
 import org.apache.gravitino.dto.responses.GroupResponse;
 import org.apache.gravitino.dto.responses.NameListResponse;
@@ -57,7 +63,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @NameBindings.AccessControlInterfaces
-@Path("/metalakes/{metalake}/groups")
+@Path("/")
 public class GroupOperations {
 
   private static final Logger LOG = LoggerFactory.getLogger(GroupOperations.class);
@@ -76,7 +82,7 @@ public class GroupOperations {
   }
 
   @GET
-  @Path("{group}")
+  @Path("/metalakes/{metalake}/groups/{group}")
   @Produces("application/vnd.gravitino.v1+json")
   @Timed(name = "get-group." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
   @ResponseMetered(name = "get-group", absolute = true)
@@ -97,6 +103,7 @@ public class GroupOperations {
   }
 
   @POST
+  @Path("/metalakes/{metalake}/groups")
   @Produces("application/vnd.gravitino.v1+json")
   @Timed(name = "add-group." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
   @ResponseMetered(name = "add-group", absolute = true)
@@ -125,7 +132,7 @@ public class GroupOperations {
   }
 
   @DELETE
-  @Path("{group}")
+  @Path("/metalakes/{metalake}/groups/{group}")
   @Produces("application/vnd.gravitino.v1+json")
   @Timed(name = "remove-group." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
   @ResponseMetered(name = "remove-group", absolute = true)
@@ -164,6 +171,7 @@ public class GroupOperations {
   }
 
   @GET
+  @Path("/metalakes/{metalake}/groups")
   @Produces("application/vnd.gravitino.v1+json")
   @Timed(name = "list-group." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
   @ResponseMetered(name = "list-group", absolute = true)
@@ -191,5 +199,87 @@ public class GroupOperations {
       return ExceptionHandlers.handleGroupException(
           OperationType.LIST, Namespace.empty().toString(), metalake, e);
     }
+  }
+
+  /**
+   * Adds groups in bulk.
+   *
+   * @param metalake The metalake name.
+   * @param request The bulk group add request.
+   * @return The bulk operation result.
+   */
+  @POST
+  @Path("/bulk/metalakes/{metalake}/groups/add")
+  @Produces("application/vnd.gravitino.v1+json")
+  @Timed(name = "bulk-add-groups." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
+  @ResponseMetered(name = "bulk-add-groups", absolute = true)
+  @AuthorizationExpression(expression = "METALAKE::OWNER || METALAKE::MANAGE_GROUPS")
+  public Response addGroups(
+      @PathParam("metalake") @AuthorizationMetadata(type = Entity.EntityType.METALAKE)
+          String metalake,
+      BulkGroupAddRequest request) {
+    try {
+      return Utils.doAs(
+          httpRequest,
+          () -> {
+            request.validate();
+            MetalakeManager.checkMetalakeInUse(metalake);
+            return Utils.ok(
+                toBulkOperationResponse(
+                    accessControlManager.bulkAddGroups(
+                        metalake, toGroupAdds(request.getGroups()))));
+          });
+    } catch (Exception e) {
+      return ExceptionHandlers.handleGroupException(OperationType.ADD, "", metalake, e);
+    }
+  }
+
+  /**
+   * Removes groups in bulk.
+   *
+   * @param metalake The metalake name.
+   * @param request The bulk group names request.
+   * @return The bulk operation result.
+   */
+  @POST
+  @Path("/bulk/metalakes/{metalake}/groups/remove")
+  @Produces("application/vnd.gravitino.v1+json")
+  @Timed(name = "bulk-remove-groups." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
+  @ResponseMetered(name = "bulk-remove-groups", absolute = true)
+  @AuthorizationExpression(expression = "METALAKE::OWNER")
+  public Response removeGroups(
+      @PathParam("metalake") @AuthorizationMetadata(type = Entity.EntityType.METALAKE)
+          String metalake,
+      GroupNamesRequest request) {
+    try {
+      return Utils.doAs(
+          httpRequest,
+          () -> {
+            request.validate();
+            MetalakeManager.checkMetalakeInUse(metalake);
+            return Utils.ok(
+                toBulkOperationResponse(
+                    accessControlManager.bulkRemoveGroups(metalake, request.getGroupNames())));
+          });
+    } catch (Exception e) {
+      return ExceptionHandlers.handleGroupException(OperationType.REMOVE, "", metalake, e);
+    }
+  }
+
+  private static GroupAdd[] toGroupAdds(GroupAddRequest[] requests) {
+    GroupAdd[] groups = new GroupAdd[requests.length];
+    for (int i = 0; i < requests.length; i++) {
+      groups[i] = new GroupAdd(requests[i].getName(), requests[i].getExternalId());
+    }
+    return groups;
+  }
+
+  private static BulkOperationResponse toBulkOperationResponse(BulkOperationResult result) {
+    BulkOperationResult.Failure[] failures = result.failed();
+    BulkOperationFailureDTO[] failureDTOs = new BulkOperationFailureDTO[failures.length];
+    for (int i = 0; i < failures.length; i++) {
+      failureDTOs[i] = new BulkOperationFailureDTO(failures[i].name(), failures[i].reason());
+    }
+    return new BulkOperationResponse(result.succeeded(), failureDTOs);
   }
 }
