@@ -32,8 +32,9 @@ import org.casbin.jcasbin.main.Enforcer;
  * invalidate).
  *
  * <p>Uses a raw Caffeine cache internally so it can attach a removal listener with {@code
- * executor(Runnable::run)} — eviction and policy cleanup must happen on the same thread, so the
- * {@link JcasbinAuthorizer} never sees a role bound in the enforcer without a backing policy.
+ * executor(Runnable::run)} — eviction and policy cleanup must happen on the same thread. This cache
+ * owns role permission policies only; user/group role bindings are version-validated and pruned
+ * separately by {@link JcasbinAuthorizer}.
  */
 class JcasbinLoadedRolesCache implements GravitinoCache<Long, Long> {
 
@@ -48,8 +49,9 @@ class JcasbinLoadedRolesCache implements GravitinoCache<Long, Long> {
             .removalListener(
                 (Long roleId, Long value, RemovalCause cause) -> {
                   if (roleId != null && cause != RemovalCause.REPLACED) {
-                    allowEnforcer.deleteRole(String.valueOf(roleId));
-                    denyEnforcer.deleteRole(String.valueOf(roleId));
+                    String roleIdStr = String.valueOf(roleId);
+                    allowEnforcer.removeFilteredPolicy(0, roleIdStr);
+                    denyEnforcer.removeFilteredPolicy(0, roleIdStr);
                   }
                 })
             .build();
