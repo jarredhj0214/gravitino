@@ -270,14 +270,16 @@ object: the owner of the table or view, plus `CREATE_TABLE` or `CREATE_VIEW` on 
 | Job template | `REGISTER_JOB_TEMPLATE` | `USE_JOB_TEMPLATE`                     | Owner           | Run a job: `RUN_JOB` and `USE_JOB_TEMPLATE` |
 | Job          |                         | Owner                                  | Owner           |                                           |
 
-Bulk user access-control APIs use the same privileges as the matching single-user operations. These
+Bulk user and group access-control APIs use the same privileges as the matching single-object operations. These
 bulk operations are authorized once before processing the request. A single bulk request must not
-contain duplicate user names.
+contain duplicate user or group names.
 
 | API                                                 | Required privilege                          | Request field |
 |-----------------------------------------------------|---------------------------------------------|---------------|
 | `POST /api/bulk/metalakes/{metalake}/users/add`     | `OWNER` of the metalake or `MANAGE_USERS`   | `users`       |
 | `POST /api/bulk/metalakes/{metalake}/users/remove`  | `OWNER` of the metalake or `MANAGE_USERS`   | `names`       |
+| `POST /api/bulk/metalakes/{metalake}/groups/add`    | `OWNER` of the metalake or `MANAGE_GROUPS`  | `groups`      |
+| `POST /api/bulk/metalakes/{metalake}/groups/remove` | `OWNER` of the metalake or `MANAGE_GROUPS`  | `names`       |
 
 Granting or revoking a privilege on an object takes `MANAGE_GRANTS` on that object or an ancestor.
 Granting or revoking a role, and overriding a role's privileges, takes `MANAGE_GRANTS` on the

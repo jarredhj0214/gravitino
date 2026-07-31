@@ -39,14 +39,19 @@ import org.apache.gravitino.GravitinoEnv;
 import org.apache.gravitino.MetadataObject;
 import org.apache.gravitino.MetadataObjects;
 import org.apache.gravitino.authorization.AccessControlDispatcher;
+import org.apache.gravitino.authorization.Group;
 import org.apache.gravitino.authorization.Owner;
 import org.apache.gravitino.authorization.OwnerDispatcher;
 import org.apache.gravitino.authorization.User;
+import org.apache.gravitino.dto.authorization.GroupDTO;
 import org.apache.gravitino.dto.authorization.UserDTO;
+import org.apache.gravitino.dto.requests.BulkGroupAddRequest;
 import org.apache.gravitino.dto.requests.BulkRemoveRequest;
 import org.apache.gravitino.dto.requests.BulkUserAddRequest;
+import org.apache.gravitino.dto.requests.GroupAddRequest;
 import org.apache.gravitino.dto.requests.UserAddRequest;
 import org.apache.gravitino.dto.responses.BulkError;
+import org.apache.gravitino.dto.responses.BulkGroupResponse;
 import org.apache.gravitino.dto.responses.BulkRemoveResponse;
 import org.apache.gravitino.dto.responses.BulkSummary;
 import org.apache.gravitino.dto.responses.BulkUserResponse;
@@ -54,6 +59,7 @@ import org.apache.gravitino.dto.responses.ErrorConstants;
 import org.apache.gravitino.dto.util.DTOConverters;
 import org.apache.gravitino.exceptions.AlreadyExistsException;
 import org.apache.gravitino.exceptions.ForbiddenException;
+import org.apache.gravitino.exceptions.NoSuchGroupException;
 import org.apache.gravitino.exceptions.NoSuchUserException;
 import org.apache.gravitino.exceptions.NotFoundException;
 import org.apache.gravitino.exceptions.NotInUseException;
@@ -183,6 +189,98 @@ public class BulkOperations {
     }
   }
 
+  /**
+   * Adds groups in bulk.
+   *
+   * @param metalake The metalake name.
+   * @param request The bulk group add request.
+   * @return The bulk group response.
+   */
+  @POST
+  @Path("groups/add")
+  @Produces("application/vnd.gravitino.v1+json")
+  @Timed(name = "bulk-add-group." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
+  @ResponseMetered(name = "bulk-add-group", absolute = true)
+  @AuthorizationExpression(expression = "METALAKE::OWNER || METALAKE::MANAGE_GROUPS")
+  public Response addGroups(
+      @PathParam("metalake") @AuthorizationMetadata(type = Entity.EntityType.METALAKE)
+          String metalake,
+      BulkGroupAddRequest request) {
+    try {
+      return Utils.doAs(
+          httpRequest,
+          () -> {
+            request.validate();
+            checkBulkSize("groups", request.getGroups().length);
+            MetalakeManager.checkMetalakeInUse(metalake);
+
+            BulkResult<GroupDTO> result =
+                executeBulk(
+                    Arrays.asList(request.getGroups()),
+                    GroupAddRequest::getName,
+                    requestItem -> DTOConverters.toDTO(addGroup(metalake, requestItem)));
+            return Utils.ok(
+                new BulkGroupResponse(
+                    result.successes.toArray(new GroupDTO[0]),
+                    result.errors.toArray(new BulkError[0]),
+                    result.summary()));
+          });
+    } catch (Exception e) {
+      return ExceptionHandlers.handleGroupException(OperationType.ADD, "", metalake, e);
+    }
+  }
+
+  /**
+   * Removes groups in bulk.
+   *
+   * @param metalake The metalake name.
+   * @param request The bulk remove request.
+   * @return The bulk remove response.
+   */
+  @POST
+  @Path("groups/remove")
+  @Produces("application/vnd.gravitino.v1+json")
+  @Timed(name = "bulk-remove-group." + MetricNames.HTTP_PROCESS_DURATION, absolute = true)
+  @ResponseMetered(name = "bulk-remove-group", absolute = true)
+  @AuthorizationExpression(expression = "METALAKE::OWNER || METALAKE::MANAGE_GROUPS")
+  public Response removeGroups(
+      @PathParam("metalake") @AuthorizationMetadata(type = Entity.EntityType.METALAKE)
+          String metalake,
+      BulkRemoveRequest request) {
+    try {
+      return Utils.doAs(
+          httpRequest,
+          () -> {
+            request.validate();
+            checkBulkSize("names", request.getNames().length);
+            MetalakeManager.checkMetalakeInUse(metalake);
+
+            Optional<Owner> metalakeOwner =
+                ownerDispatcher.getOwner(
+                    metalake, MetadataObjects.of(null, metalake, MetadataObject.Type.METALAKE));
+
+            BulkResult<String> result =
+                executeBulk(
+                    Arrays.asList(request.getNames()),
+                    Function.identity(),
+                    name -> {
+                      ensureGroupIsNotMetalakeOwner(metalakeOwner, metalake, name);
+                      if (!accessControlManager.removeGroup(metalake, name)) {
+                        throw new NoSuchGroupException("Group does not exist: %s", name);
+                      }
+                      return name;
+                    });
+            return Utils.ok(
+                new BulkRemoveResponse(
+                    result.successes.toArray(new String[0]),
+                    result.errors.toArray(new BulkError[0]),
+                    result.summary()));
+          });
+    } catch (Exception e) {
+      return ExceptionHandlers.handleGroupException(OperationType.REMOVE, "", metalake, e);
+    }
+  }
+
   private User addUser(String metalake, UserAddRequest request) {
     return StringUtils.isNotBlank(request.getExternalId())
         ? accessControlManager.addUser(
@@ -191,6 +289,12 @@ public class BulkOperations {
             request.getExternalId(),
             Optional.ofNullable(request.getEnabled()).orElse(true))
         : accessControlManager.addUser(metalake, request.getName());
+  }
+
+  private Group addGroup(String metalake, GroupAddRequest request) {
+    return StringUtils.isNotBlank(request.getExternalId())
+        ? accessControlManager.addGroup(metalake, request.getName(), request.getExternalId())
+        : accessControlManager.addGroup(metalake, request.getName());
   }
 
   private void checkBulkSize(String fieldName, int size) {
@@ -211,6 +315,19 @@ public class BulkOperations {
                 String.format(
                     "Cannot remove user %s from metalake %s because the user is the owner of the metalake.",
                     user, metalake));
+          }
+        });
+  }
+
+  private void ensureGroupIsNotMetalakeOwner(
+      Optional<Owner> metalakeOwner, String metalake, String group) {
+    metalakeOwner.ifPresent(
+        owner -> {
+          if (owner.type() == Owner.Type.GROUP && owner.name().equals(group)) {
+            throw new IllegalArgumentException(
+                String.format(
+                    "Cannot remove group %s from metalake %s because the group is the owner of the metalake.",
+                    group, metalake));
           }
         });
   }

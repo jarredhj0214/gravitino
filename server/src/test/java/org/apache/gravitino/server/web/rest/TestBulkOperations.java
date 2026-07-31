@@ -43,21 +43,27 @@ import org.apache.gravitino.Config;
 import org.apache.gravitino.EntityStore;
 import org.apache.gravitino.GravitinoEnv;
 import org.apache.gravitino.authorization.AccessControlManager;
+import org.apache.gravitino.authorization.Group;
 import org.apache.gravitino.authorization.OwnerDispatcher;
 import org.apache.gravitino.authorization.User;
 import org.apache.gravitino.config.ConfigEntry;
 import org.apache.gravitino.connector.PropertiesMetadata;
+import org.apache.gravitino.dto.requests.BulkGroupAddRequest;
 import org.apache.gravitino.dto.requests.BulkRemoveRequest;
 import org.apache.gravitino.dto.requests.BulkUserAddRequest;
+import org.apache.gravitino.dto.requests.GroupAddRequest;
 import org.apache.gravitino.dto.requests.UserAddRequest;
+import org.apache.gravitino.dto.responses.BulkGroupResponse;
 import org.apache.gravitino.dto.responses.BulkRemoveResponse;
 import org.apache.gravitino.dto.responses.BulkUserResponse;
 import org.apache.gravitino.dto.responses.ErrorConstants;
 import org.apache.gravitino.dto.responses.ErrorResponse;
+import org.apache.gravitino.exceptions.GroupAlreadyExistsException;
 import org.apache.gravitino.exceptions.UserAlreadyExistsException;
 import org.apache.gravitino.lock.LockManager;
 import org.apache.gravitino.meta.AuditInfo;
 import org.apache.gravitino.meta.BaseMetalake;
+import org.apache.gravitino.meta.GroupEntity;
 import org.apache.gravitino.meta.UserEntity;
 import org.apache.gravitino.rest.RESTUtils;
 import org.apache.gravitino.server.ServerConfig;
@@ -197,6 +203,54 @@ public class TestBulkOperations extends BaseOperationsTest {
   }
 
   @Test
+  public void testBulkAddGroupsUrlAndBestEffort() {
+    Group group1 = buildGroup("group1");
+    when(manager.addGroup(any(), eq("group1"))).thenReturn(group1);
+    doThrow(new GroupAlreadyExistsException("Group already exists: group2"))
+        .when(manager)
+        .addGroup(any(), eq("group2"));
+
+    BulkGroupAddRequest request =
+        new BulkGroupAddRequest(
+            new GroupAddRequest[] {new GroupAddRequest("group1"), new GroupAddRequest("group2")});
+    Response response =
+        target("/bulk/metalakes/metalake1/groups/add")
+            .request(MediaType.APPLICATION_JSON_TYPE)
+            .accept("application/vnd.gravitino.v1+json")
+            .post(Entity.entity(request, MediaType.APPLICATION_JSON_TYPE));
+
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+    BulkGroupResponse bulkResponse = response.readEntity(BulkGroupResponse.class);
+    Assertions.assertEquals(1, bulkResponse.getGroups().length);
+    Assertions.assertEquals("group1", bulkResponse.getGroups()[0].name());
+    Assertions.assertEquals(1, bulkResponse.getErrors().length);
+    Assertions.assertEquals("group2", bulkResponse.getErrors()[0].getName());
+  }
+
+  @Test
+  public void testBulkRemoveGroupsBestEffort() {
+    when(manager.removeGroup(any(), eq("group1"))).thenReturn(true);
+    when(manager.removeGroup(any(), eq("ghost"))).thenReturn(false);
+
+    BulkRemoveRequest request = new BulkRemoveRequest(new String[] {"group1", "ghost"});
+    Response response =
+        target("/bulk/metalakes/metalake1/groups/remove")
+            .request(MediaType.APPLICATION_JSON_TYPE)
+            .accept("application/vnd.gravitino.v1+json")
+            .post(Entity.entity(request, MediaType.APPLICATION_JSON_TYPE));
+
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+    BulkRemoveResponse bulkResponse = response.readEntity(BulkRemoveResponse.class);
+    Assertions.assertArrayEquals(new String[] {"group1"}, bulkResponse.getNames());
+    Assertions.assertEquals(1, bulkResponse.getErrors().length);
+    Assertions.assertEquals("ghost", bulkResponse.getErrors()[0].getName());
+    Assertions.assertEquals(ErrorConstants.NOT_FOUND_CODE, bulkResponse.getErrors()[0].getCode());
+    Assertions.assertEquals(2, bulkResponse.getSummary().getTotal());
+    Assertions.assertEquals(1, bulkResponse.getSummary().getSucceeded());
+    Assertions.assertEquals(1, bulkResponse.getSummary().getFailed());
+  }
+
+  @Test
   public void testBulkRejectsEmptyAndExceededRequest() {
     Response emptyResponse =
         target("/bulk/metalakes/metalake1/users/add")
@@ -225,6 +279,16 @@ public class TestBulkOperations extends BaseOperationsTest {
     return UserEntity.builder()
         .withId(1L)
         .withName(user)
+        .withRoleNames(Collections.emptyList())
+        .withAuditInfo(
+            AuditInfo.builder().withCreator("creator").withCreateTime(Instant.now()).build())
+        .build();
+  }
+
+  private Group buildGroup(String group) {
+    return GroupEntity.builder()
+        .withId(1L)
+        .withName(group)
         .withRoleNames(Collections.emptyList())
         .withAuditInfo(
             AuditInfo.builder().withCreator("creator").withCreateTime(Instant.now()).build())
