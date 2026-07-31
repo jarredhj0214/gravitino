@@ -270,6 +270,22 @@ object: the owner of the table or view, plus `CREATE_TABLE` or `CREATE_VIEW` on 
 | Job template | `REGISTER_JOB_TEMPLATE` | `USE_JOB_TEMPLATE`                     | Owner           | Run a job: `RUN_JOB` and `USE_JOB_TEMPLATE` |
 | Job          |                         | Owner                                  | Owner           |                                           |
 
+Bulk access-control APIs use the same privileges as the matching single-object operations. Bulk
+operations guarded only by metalake-level privileges are authorized once before processing the
+request. `roles/remove` keeps the single-role delete semantics: each role is authorized with
+`METALAKE::OWNER || ROLE::OWNER`, so unauthorized role names are returned as item-level errors
+without blocking other authorized role deletions. A single bulk request must not contain duplicate
+user, group, or role names.
+
+| API                                                 | Required privilege                          | Request field |
+|-----------------------------------------------------|---------------------------------------------|---------------|
+| `POST /api/bulk/metalakes/{metalake}/users/add`     | `OWNER` of the metalake or `MANAGE_USERS`   | `users`       |
+| `POST /api/bulk/metalakes/{metalake}/users/remove`  | `OWNER` of the metalake or `MANAGE_USERS`   | `names`       |
+| `POST /api/bulk/metalakes/{metalake}/groups/add`    | `OWNER` of the metalake or `MANAGE_GROUPS`  | `groups`      |
+| `POST /api/bulk/metalakes/{metalake}/groups/remove` | `OWNER` of the metalake or `MANAGE_GROUPS`  | `names`       |
+| `POST /api/bulk/metalakes/{metalake}/roles/add`     | `OWNER` of the metalake or `CREATE_ROLE`    | `roles`       |
+| `POST /api/bulk/metalakes/{metalake}/roles/remove`  | `OWNER` of the metalake or `OWNER` of each role | `names`   |
+
 Granting or revoking a privilege on an object takes `MANAGE_GRANTS` on that object or an ancestor.
 Granting or revoking a role, and overriding a role's privileges, takes `MANAGE_GRANTS` on the
 metalake. Setting an owner takes ownership.
