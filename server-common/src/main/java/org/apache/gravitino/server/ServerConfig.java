@@ -44,6 +44,14 @@ public class ServerConfig extends Config {
           .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
           .createWithDefault(2000L);
 
+  public static final ConfigEntry<Integer> BULK_MAX_ITEMS =
+      new ConfigBuilder("gravitino.server.bulk.maxItems")
+          .doc("The maximum number of items allowed in a single bulk request")
+          .version(ConfigConstants.VERSION_2_0_0)
+          .intConf()
+          .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
+          .createWithDefault(100);
+
   public ServerConfig(boolean loadDefaults) {
     super(loadDefaults);
   }
