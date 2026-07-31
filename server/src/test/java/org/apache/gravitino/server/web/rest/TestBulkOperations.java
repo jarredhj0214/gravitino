@@ -29,6 +29,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.google.common.collect.Lists;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Collections;
@@ -45,25 +46,37 @@ import org.apache.gravitino.GravitinoEnv;
 import org.apache.gravitino.authorization.AccessControlManager;
 import org.apache.gravitino.authorization.Group;
 import org.apache.gravitino.authorization.OwnerDispatcher;
+import org.apache.gravitino.authorization.Privileges;
+import org.apache.gravitino.authorization.Role;
+import org.apache.gravitino.authorization.SecurableObject;
+import org.apache.gravitino.authorization.SecurableObjects;
 import org.apache.gravitino.authorization.User;
+import org.apache.gravitino.catalog.CatalogDispatcher;
 import org.apache.gravitino.config.ConfigEntry;
 import org.apache.gravitino.connector.PropertiesMetadata;
+import org.apache.gravitino.dto.authorization.SecurableObjectDTO;
 import org.apache.gravitino.dto.requests.BulkGroupAddRequest;
 import org.apache.gravitino.dto.requests.BulkRemoveRequest;
+import org.apache.gravitino.dto.requests.BulkRoleCreateRequest;
 import org.apache.gravitino.dto.requests.BulkUserAddRequest;
 import org.apache.gravitino.dto.requests.GroupAddRequest;
+import org.apache.gravitino.dto.requests.RoleCreateRequest;
 import org.apache.gravitino.dto.requests.UserAddRequest;
 import org.apache.gravitino.dto.responses.BulkGroupResponse;
 import org.apache.gravitino.dto.responses.BulkRemoveResponse;
+import org.apache.gravitino.dto.responses.BulkRoleResponse;
 import org.apache.gravitino.dto.responses.BulkUserResponse;
 import org.apache.gravitino.dto.responses.ErrorConstants;
 import org.apache.gravitino.dto.responses.ErrorResponse;
+import org.apache.gravitino.dto.util.DTOConverters;
 import org.apache.gravitino.exceptions.GroupAlreadyExistsException;
+import org.apache.gravitino.exceptions.RoleAlreadyExistsException;
 import org.apache.gravitino.exceptions.UserAlreadyExistsException;
 import org.apache.gravitino.lock.LockManager;
 import org.apache.gravitino.meta.AuditInfo;
 import org.apache.gravitino.meta.BaseMetalake;
 import org.apache.gravitino.meta.GroupEntity;
+import org.apache.gravitino.meta.RoleEntity;
 import org.apache.gravitino.meta.UserEntity;
 import org.apache.gravitino.rest.RESTUtils;
 import org.apache.gravitino.server.ServerConfig;
@@ -79,6 +92,7 @@ import org.mockito.Mockito;
 public class TestBulkOperations extends BaseOperationsTest {
 
   private static final AccessControlManager manager = mock(AccessControlManager.class);
+  private static final CatalogDispatcher catalogDispatcher = mock(CatalogDispatcher.class);
   private static final EntityStore entityStore = mock(EntityStore.class);
   private static final OwnerDispatcher ownerDispatcher = mock(OwnerDispatcher.class);
   private static BulkOperations bulkOperations;
@@ -113,6 +127,7 @@ public class TestBulkOperations extends BaseOperationsTest {
     FieldUtils.writeField(GravitinoEnv.getInstance(), "config", config, true);
     FieldUtils.writeField(GravitinoEnv.getInstance(), "lockManager", new LockManager(config), true);
     FieldUtils.writeField(GravitinoEnv.getInstance(), "accessControlDispatcher", manager, true);
+    FieldUtils.writeField(GravitinoEnv.getInstance(), "catalogDispatcher", catalogDispatcher, true);
     FieldUtils.writeField(GravitinoEnv.getInstance(), "ownerDispatcher", ownerDispatcher, true);
     FieldUtils.writeField(GravitinoEnv.getInstance(), "entityStore", entityStore, true);
     bulkOperations = new BulkOperations();
@@ -120,13 +135,15 @@ public class TestBulkOperations extends BaseOperationsTest {
 
   @BeforeEach
   public void resetMocks() throws IOException {
-    Mockito.reset(manager, entityStore, ownerDispatcher);
+    Mockito.reset(manager, catalogDispatcher, entityStore, ownerDispatcher);
     BaseMetalake metalake = mock(BaseMetalake.class);
     PropertiesMetadata propertiesMetadata = mock(PropertiesMetadata.class);
     when(propertiesMetadata.getOrDefault(any(), any())).thenReturn(true);
     when(metalake.propertiesMetadata()).thenReturn(propertiesMetadata);
     when(entityStore.get(any(), any(), any())).thenReturn(metalake);
     when(ownerDispatcher.getOwner(any(), any())).thenReturn(Optional.empty());
+    bulkOperations.setMetalakeOwnerAuthorizer(metalakeName -> false);
+    bulkOperations.setRoleDeletionAuthorizer((metalakeName, role) -> true);
   }
 
   @Override
@@ -251,6 +268,121 @@ public class TestBulkOperations extends BaseOperationsTest {
   }
 
   @Test
+  public void testBulkCreateRolesBestEffort() {
+    SecurableObject securableObject =
+        SecurableObjects.ofCatalog("catalog", Lists.newArrayList(Privileges.UseCatalog.allow()));
+    RoleCreateRequest role1 =
+        new RoleCreateRequest(
+            "role1",
+            Collections.emptyMap(),
+            new SecurableObjectDTO[] {DTOConverters.toDTO(securableObject)});
+    RoleCreateRequest role2 =
+        new RoleCreateRequest(
+            "role2",
+            Collections.emptyMap(),
+            new SecurableObjectDTO[] {DTOConverters.toDTO(securableObject)});
+
+    Role role = buildRole("role1");
+    when(catalogDispatcher.catalogExists(any())).thenReturn(true);
+    when(manager.createRole(any(), eq("role1"), any(), any())).thenReturn(role);
+    doThrow(new RoleAlreadyExistsException("Role already exists: role2"))
+        .when(manager)
+        .createRole(any(), eq("role2"), any(), any());
+
+    Response response =
+        target("/bulk/metalakes/metalake1/roles/add")
+            .request(MediaType.APPLICATION_JSON_TYPE)
+            .accept("application/vnd.gravitino.v1+json")
+            .post(
+                Entity.entity(
+                    new BulkRoleCreateRequest(new RoleCreateRequest[] {role1, role2}),
+                    MediaType.APPLICATION_JSON_TYPE));
+
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+    BulkRoleResponse bulkResponse = response.readEntity(BulkRoleResponse.class);
+    Assertions.assertEquals(1, bulkResponse.getRoles().length);
+    Assertions.assertEquals("role1", bulkResponse.getRoles()[0].name());
+    Assertions.assertEquals(1, bulkResponse.getErrors().length);
+    Assertions.assertEquals("role2", bulkResponse.getErrors()[0].getName());
+    Assertions.assertEquals(
+        ErrorConstants.ALREADY_EXISTS_CODE, bulkResponse.getErrors()[0].getCode());
+  }
+
+  @Test
+  public void testBulkDeleteRolesBestEffort() {
+    when(manager.deleteRole(any(), eq("role1"))).thenReturn(true);
+    when(manager.deleteRole(any(), eq("missing"))).thenReturn(false);
+
+    Response response =
+        target("/bulk/metalakes/metalake1/roles/remove")
+            .request(MediaType.APPLICATION_JSON_TYPE)
+            .accept("application/vnd.gravitino.v1+json")
+            .post(
+                Entity.entity(
+                    new BulkRemoveRequest(new String[] {"role1", "missing"}),
+                    MediaType.APPLICATION_JSON_TYPE));
+
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+    BulkRemoveResponse bulkResponse = response.readEntity(BulkRemoveResponse.class);
+    Assertions.assertArrayEquals(new String[] {"role1"}, bulkResponse.getNames());
+    Assertions.assertEquals(1, bulkResponse.getErrors().length);
+    Assertions.assertEquals("missing", bulkResponse.getErrors()[0].getName());
+    Assertions.assertEquals(ErrorConstants.NOT_FOUND_CODE, bulkResponse.getErrors()[0].getCode());
+  }
+
+  @Test
+  public void testBulkDeleteRolesAddsForbiddenItemToErrors() {
+    bulkOperations.setRoleDeletionAuthorizer((metalakeName, role) -> !"role2".equals(role));
+    when(manager.deleteRole(any(), eq("role1"))).thenReturn(true);
+
+    Response response =
+        target("/bulk/metalakes/metalake1/roles/remove")
+            .request(MediaType.APPLICATION_JSON_TYPE)
+            .accept("application/vnd.gravitino.v1+json")
+            .post(
+                Entity.entity(
+                    new BulkRemoveRequest(new String[] {"role1", "role2"}),
+                    MediaType.APPLICATION_JSON_TYPE));
+
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+    BulkRemoveResponse bulkResponse = response.readEntity(BulkRemoveResponse.class);
+    Assertions.assertArrayEquals(new String[] {"role1"}, bulkResponse.getNames());
+    Assertions.assertEquals(1, bulkResponse.getErrors().length);
+    Assertions.assertEquals(1, bulkResponse.getErrors()[0].getIndex());
+    Assertions.assertEquals("role2", bulkResponse.getErrors()[0].getName());
+    Assertions.assertEquals(ErrorConstants.FORBIDDEN_CODE, bulkResponse.getErrors()[0].getCode());
+    Assertions.assertEquals(2, bulkResponse.getSummary().getTotal());
+    Assertions.assertEquals(1, bulkResponse.getSummary().getSucceeded());
+    Assertions.assertEquals(1, bulkResponse.getSummary().getFailed());
+  }
+
+  @Test
+  public void testBulkDeleteRolesSkipsItemAuthorizationForMetalakeOwner() {
+    bulkOperations.setMetalakeOwnerAuthorizer(metalakeName -> true);
+    bulkOperations.setRoleDeletionAuthorizer(
+        (metalakeName, role) -> {
+          throw new AssertionError("Role owner authorization should be skipped");
+        });
+    when(manager.deleteRole(any(), eq("role1"))).thenReturn(true);
+    when(manager.deleteRole(any(), eq("role2"))).thenReturn(true);
+
+    Response response =
+        target("/bulk/metalakes/metalake1/roles/remove")
+            .request(MediaType.APPLICATION_JSON_TYPE)
+            .accept("application/vnd.gravitino.v1+json")
+            .post(
+                Entity.entity(
+                    new BulkRemoveRequest(new String[] {"role1", "role2"}),
+                    MediaType.APPLICATION_JSON_TYPE));
+
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+    BulkRemoveResponse bulkResponse = response.readEntity(BulkRemoveResponse.class);
+    Assertions.assertArrayEquals(new String[] {"role1", "role2"}, bulkResponse.getNames());
+    Assertions.assertEquals(0, bulkResponse.getErrors().length);
+    Assertions.assertEquals(2, bulkResponse.getSummary().getSucceeded());
+  }
+
+  @Test
   public void testBulkRejectsEmptyAndExceededRequest() {
     Response emptyResponse =
         target("/bulk/metalakes/metalake1/users/add")
@@ -290,6 +422,19 @@ public class TestBulkOperations extends BaseOperationsTest {
         .withId(1L)
         .withName(group)
         .withRoleNames(Collections.emptyList())
+        .withAuditInfo(
+            AuditInfo.builder().withCreator("creator").withCreateTime(Instant.now()).build())
+        .build();
+  }
+
+  private Role buildRole(String role) {
+    SecurableObject catalog =
+        SecurableObjects.ofCatalog("catalog", Lists.newArrayList(Privileges.UseCatalog.allow()));
+    return RoleEntity.builder()
+        .withId(1L)
+        .withName(role)
+        .withProperties(Collections.emptyMap())
+        .withSecurableObjects(Lists.newArrayList(catalog))
         .withAuditInfo(
             AuditInfo.builder().withCreator("creator").withCreateTime(Instant.now()).build())
         .build();

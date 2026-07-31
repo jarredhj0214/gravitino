@@ -187,6 +187,90 @@ paths:
         "5xx":
           $ref: "./openapi.yaml#/components/responses/ServerErrorResponse"
 
+  /bulk/metalakes/{metalake}/roles/add:
+    parameters:
+      - $ref: "./openapi.yaml#/components/parameters/metalake"
+
+    post:
+      tags:
+        - access control
+      summary: Create roles in bulk
+      operationId: bulkCreateRoles
+      description: Creates roles in best-effort mode. Failed items are returned in the top-level errors array. Role names in the same request must be unique. The maximum request size is controlled by `gravitino.server.bulk.maxItems`, which defaults to 100.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkRoleCreateRequest"
+            examples:
+              BulkRoleCreateRequest:
+                $ref: "#/components/examples/BulkRoleCreateRequest"
+      responses:
+        "200":
+          description: Returns successfully created roles and item-level errors
+          content:
+            application/vnd.gravitino.v1+json:
+              schema:
+                $ref: "#/components/schemas/BulkRoleResponse"
+              examples:
+                BulkRoleResponse:
+                  $ref: "#/components/examples/BulkRoleResponse"
+        "400":
+          $ref: "./openapi.yaml#/components/responses/BadRequestErrorResponse"
+        "404":
+          description: Not Found - The specified metalake does not exist
+          content:
+            application/vnd.gravitino.v1+json:
+              schema:
+                $ref: "./openapi.yaml#/components/schemas/ErrorModel"
+              examples:
+                NoSuchMetalakeException:
+                  $ref: "./metalakes.yaml#/components/examples/NoSuchMetalakeException"
+        "5xx":
+          $ref: "./openapi.yaml#/components/responses/ServerErrorResponse"
+
+  /bulk/metalakes/{metalake}/roles/remove:
+    parameters:
+      - $ref: "./openapi.yaml#/components/parameters/metalake"
+
+    post:
+      tags:
+        - access control
+      summary: Delete roles in bulk
+      operationId: bulkDeleteRoles
+      description: Deletes roles in best-effort mode. Failed items are returned in the top-level errors array. Role names in the same request must be unique. Role deletion is authorized per role name using the same `METALAKE::OWNER || ROLE::OWNER` semantics as the single-role delete API. The maximum request size is controlled by `gravitino.server.bulk.maxItems`, which defaults to 100.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkRemoveRequest"
+            examples:
+              BulkRemoveRequest:
+                $ref: "#/components/examples/BulkRemoveRequest"
+      responses:
+        "200":
+          description: Returns successfully deleted names and item-level errors
+          content:
+            application/vnd.gravitino.v1+json:
+              schema:
+                $ref: "#/components/schemas/BulkRemoveResponse"
+              examples:
+                BulkRemoveResponse:
+                  $ref: "#/components/examples/BulkRemoveResponse"
+        "400":
+          $ref: "./openapi.yaml#/components/responses/BadRequestErrorResponse"
+        "404":
+          description: Not Found - The specified metalake does not exist
+          content:
+            application/vnd.gravitino.v1+json:
+              schema:
+                $ref: "./openapi.yaml#/components/schemas/ErrorModel"
+              examples:
+                NoSuchMetalakeException:
+                  $ref: "./metalakes.yaml#/components/examples/NoSuchMetalakeException"
+        "5xx":
+          $ref: "./openapi.yaml#/components/responses/ServerErrorResponse"
+
 components:
 
   schemas:
@@ -213,6 +297,18 @@ components:
           description: The maximum length is controlled by `gravitino.server.bulk.maxItems`, which defaults to 100.
           items:
             $ref: "./groups.yaml#/components/schemas/GroupAddRequest"
+
+    BulkRoleCreateRequest:
+      type: object
+      required:
+        - roles
+      properties:
+        roles:
+          type: array
+          minItems: 1
+          description: The maximum length is controlled by `gravitino.server.bulk.maxItems`, which defaults to 100.
+          items:
+            $ref: "./roles.yaml#/components/schemas/RoleCreateRequest"
 
     BulkRemoveRequest:
       type: object
@@ -313,6 +409,28 @@ components:
         summary:
           $ref: "#/components/schemas/BulkSummary"
 
+    BulkRoleResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+          description: Status code of the response
+          enum:
+            - 0
+        roles:
+          type: array
+          description: Successfully created roles
+          items:
+            $ref: "./roles.yaml#/components/schemas/Role"
+        errors:
+          type: array
+          description: Item-level errors
+          items:
+            $ref: "#/components/schemas/BulkError"
+        summary:
+          $ref: "#/components/schemas/BulkSummary"
+
     BulkRemoveResponse:
       type: object
       properties:
@@ -349,6 +467,25 @@ components:
         "groups": [
           {"name": "analysts", "externalId": "ext-analysts"},
           {"name": "engineers"}
+        ]
+      }
+
+    BulkRoleCreateRequest:
+      value: {
+        "roles": [
+          {
+            "name": "data_reader",
+            "properties": {"owner": "platform"},
+            "securableObjects": [
+              {
+                "fullName": "catalog1.schema1",
+                "type": "SCHEMA",
+                "privileges": [
+                  {"name": "USE_SCHEMA", "condition": "ALLOW"}
+                ]
+              }
+            ]
+          }
         ]
       }
 
@@ -396,6 +533,20 @@ components:
               "creator": "gravitino",
               "createTime": "2026-07-28T10:00:00Z"
             }
+          }
+        ],
+        "errors": [],
+        "summary": {"total": 1, "succeeded": 1, "failed": 0}
+      }
+
+    BulkRoleResponse:
+      value: {
+        "code": 0,
+        "roles": [
+          {
+            "name": "data_reader",
+            "properties": {"owner": "platform"},
+            "securableObjects": []
           }
         ],
         "errors": [],
