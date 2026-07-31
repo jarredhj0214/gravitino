@@ -20,11 +20,7 @@ package org.apache.gravitino.server.web.rest;
 
 import com.codahale.metrics.annotation.ResponseMetered;
 import com.codahale.metrics.annotation.Timed;
-import com.google.common.collect.Sets;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
@@ -36,22 +32,13 @@ import javax.ws.rs.core.Context;
 import javax.ws.rs.core.Response;
 import org.apache.gravitino.Entity;
 import org.apache.gravitino.GravitinoEnv;
-import org.apache.gravitino.MetadataObject;
-import org.apache.gravitino.MetadataObjects;
 import org.apache.gravitino.authorization.AccessControlDispatcher;
-import org.apache.gravitino.authorization.AuthorizationUtils;
-import org.apache.gravitino.authorization.Privilege;
 import org.apache.gravitino.authorization.SecurableObject;
-import org.apache.gravitino.authorization.SecurableObjects;
-import org.apache.gravitino.dto.authorization.PrivilegeDTO;
-import org.apache.gravitino.dto.authorization.SecurableObjectDTO;
 import org.apache.gravitino.dto.requests.RoleCreateRequest;
 import org.apache.gravitino.dto.responses.DropResponse;
 import org.apache.gravitino.dto.responses.NameListResponse;
 import org.apache.gravitino.dto.responses.RoleResponse;
 import org.apache.gravitino.dto.util.DTOConverters;
-import org.apache.gravitino.exceptions.IllegalMetadataObjectException;
-import org.apache.gravitino.exceptions.NoSuchMetadataObjectException;
 import org.apache.gravitino.metalake.MetalakeManager;
 import org.apache.gravitino.metrics.MetricNames;
 import org.apache.gravitino.server.authorization.MetadataAuthzHelper;
@@ -60,7 +47,6 @@ import org.apache.gravitino.server.authorization.annotations.AuthorizationExpres
 import org.apache.gravitino.server.authorization.annotations.AuthorizationMetadata;
 import org.apache.gravitino.server.authorization.expression.AuthorizationExpressionConstants;
 import org.apache.gravitino.server.web.Utils;
-import org.apache.gravitino.utils.MetadataObjectUtil;
 import org.apache.gravitino.utils.NameIdentifierUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -147,45 +133,8 @@ public class RoleOperations {
           () -> {
             request.validate();
             MetalakeManager.checkMetalakeInUse(metalake);
-            Set<MetadataObject> metadataObjects = Sets.newHashSet();
-            for (SecurableObjectDTO object : request.getSecurableObjects()) {
-              MetadataObject metadataObject =
-                  MetadataObjects.parse(object.getFullName(), object.type());
-              if (metadataObjects.contains(metadataObject)) {
-                throw new IllegalArgumentException(
-                    String.format(
-                        "Doesn't support specifying duplicated securable objects %s type %s",
-                        object.fullName(), object.type()));
-              } else {
-                metadataObjects.add(metadataObject);
-              }
-
-              Set<Privilege> privileges = Sets.newHashSet(object.privileges());
-              AuthorizationUtils.checkDuplicatedNamePrivilege(privileges);
-              try {
-                for (Privilege privilege : object.privileges()) {
-                  AuthorizationUtils.checkPrivilege((PrivilegeDTO) privilege, object, metalake);
-                }
-                MetadataObjectUtil.checkMetadataObject(metalake, object);
-              } catch (NoSuchMetadataObjectException nsm) {
-                throw new IllegalMetadataObjectException(nsm);
-              }
-            }
-
             List<SecurableObject> securableObjects =
-                Arrays.stream(request.getSecurableObjects())
-                    .map(
-                        securableObjectDTO ->
-                            SecurableObjects.parse(
-                                securableObjectDTO.fullName(),
-                                securableObjectDTO.type(),
-                                securableObjectDTO.privileges().stream()
-                                    .map(
-                                        privilege ->
-                                            DTOConverters.fromPrivilegeDTO(
-                                                (PrivilegeDTO) privilege))
-                                    .collect(Collectors.toList())))
-                    .collect(Collectors.toList());
+                RoleRequestUtils.validateAndConvertSecurableObjects(metalake, request);
             return Utils.ok(
                 new RoleResponse(
                     DTOConverters.toDTO(
