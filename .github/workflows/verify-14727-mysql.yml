@@ -1,0 +1,48 @@
+name: Verify PR 14727 MySQL integration
+on:
+  push:
+    branches: [codex/verify-14727-mysql]
+permissions:
+  contents: read
+jobs:
+  mysql:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d6f76e5afca1888662a7ba3d0d45239bebfa93c0
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Run the two MySQL integration cases
+        run: >-
+          ./gradlew :catalogs:catalog-jdbc-mysql:test
+          --tests 'org.apache.gravitino.catalog.mysql.integration.test.CatalogMysqlIT.testZeroDateDefaultsSurviveLoadAndAlter'
+          -PskipTests -PskipDockerTests=false -PskipWeb=true
+      - name: Verify both modes ran and passed
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import xml.etree.ElementTree as ET
+          report = pathlib.Path("catalogs/catalog-jdbc-mysql/build/test-results/test/TEST-org.apache.gravitino.catalog.mysql.integration.test.CatalogMysqlIT.xml")
+          results = {}
+          for case in ET.parse(report).getroot().findall("testcase"):
+              name = case.attrib["name"]
+              for mode in ("true", "false"):
+                  if mode in name:
+                      results[mode] = all(case.find(tag) is None for tag in ("failure", "error", "skipped"))
+                      print(f"{name}: {'PASS' if results[mode] else 'FAIL/SKIP'}")
+          assert results == {"true": True, "false": True}, results
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mysql-integration-results
+          path: |
+            catalogs/catalog-jdbc-mysql/build/test-results/test/*.xml
+            build/reports/tests/catalogs/catalog-jdbc-mysql/test/
